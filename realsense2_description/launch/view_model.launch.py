@@ -22,6 +22,9 @@ import sys
 sys.path.append(os.path.dirname(os.path.realpath(__file__)))
 from launch_utils import to_urdf
 
+from launch.actions import IncludeLaunchDescription
+from launch.launch_description_sources import PythonLaunchDescriptionSource
+from launch.substitutions import PathJoinSubstitution
 
 def generate_launch_description():
     available_urdf_files = [f for f in os.listdir(os.path.join(get_package_share_directory('realsense2_description'), 'urdf')) if f.startswith('test_')]
@@ -36,6 +39,7 @@ def generate_launch_description():
     rviz_config_dir = os.path.join(get_package_share_directory('realsense2_description'), 'rviz', 'urdf.rviz')
     xacro_path = os.path.join(get_package_share_directory('realsense2_description'), 'urdf', params['model'])
     urdf = to_urdf(xacro_path, {'use_nominal_extrinsics': 'true', 'add_plug': 'true'})
+    
     rviz_node = Node(
         package='rviz2',
         executable='rviz2',
@@ -43,7 +47,47 @@ def generate_launch_description():
         output='screen',
         arguments=['-d', rviz_config_dir],
         parameters=[{'use_sim_time': False}]
+    )
+    
+    pkg_gazebo_ros = get_package_share_directory("gazebo_ros")
+
+    gzserver_cmd = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(
+            os.path.join(pkg_gazebo_ros, "launch", "gzserver.launch.py")
+        ),
+        launch_arguments={
+            "world": PathJoinSubstitution(
+                [get_package_share_directory("scout_gazebo_sim"), "worlds", "empty.world"]
+            )
+        }.items(),
+    )
+
+    gzclient_cmd = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(
+            os.path.join(pkg_gazebo_ros, "launch", "gzclient.launch.py")
         )
+    )
+
+    start_gazebo_ros_spawner_cmd = Node(
+        package="gazebo_ros",
+        executable="spawn_entity.py",
+        arguments=[
+            "-entity",
+            "intel_d435i_camera",
+            "-file",
+            urdf,
+            "-x",
+            "0.0",
+            "-y",
+            "0.0",
+            "-z",
+            "0.5",
+            "-Y",
+            "0.0",
+        ],
+        output="screen",
+    )
+    
     model_node = Node(
         name='model_node',
         package='robot_state_publisher',
@@ -51,5 +95,10 @@ def generate_launch_description():
         namespace='',
         output='screen',
         arguments=[urdf]
-        )
-    return launch.LaunchDescription([rviz_node, model_node])
+    )
+    return launch.LaunchDescription([
+        rviz_node, 
+        gzserver_cmd,
+        gzclient_cmd,
+        start_gazebo_ros_spawner_cmd,
+        model_node])
